@@ -21,7 +21,7 @@ EventBus功能特性
 
 What makes greenrobot’s EventBus unique, are its features:
 
-使得greenrobot独一无二的特性分别有：
+使得greenrobot的EventBus独一无二的特性分别有：
 
 Simple yet powerful: EventBus is a tiny library with an API that is super easy to learn. Nevertheless, your software architecture may great benefit by decoupling components: Subscribers do not have know about senders, when using events.
 
