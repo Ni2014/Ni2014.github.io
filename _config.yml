@@ -1,6 +1,6 @@
 # Site settings
-title: 宸笙
-SEOTitle: 宸笙的博客 | Android Blog
+title: 宸笙(照蕴)
+SEOTitle: 宸笙(照蕴)的博客 | Android Blog
 header-img: img/post-bg-desk.jpg
 email: shengview@qq.com
 description: "万念俱因果业障，勤拭祛贪嗔痴慢."
@@ -60,14 +60,14 @@ kramdown:
 # disqus_username: qiubaiying
 
 # Gitalk
-gitalk:
-  enable: true    #是否开启Gitalk评论
-  clientID: f2c84e7629bb1446c1a4                            #生成的clientID
-  clientSecret: ca6d6139d1e1b8c43f8b2e19492ddcac8b322d0d    #生成的clientSecret
-  repo: qiubaiying.github.io    #仓库名称
-  owner: qiubaiying    #github用户名
-  admin: qiubaiying
-  distractionFreeMode: true #是否启用类似FB的阴影遮罩
+#gitalk:
+ # enable: true    #是否开启Gitalk评论
+  #clientID: f2c84e7629bb1446c1a4                            #生成的clientID
+  #clientSecret: ca6d6139d1e1b8c43f8b2e19492ddcac8b322d0d    #生成的clientSecret
+  #repo: qiubaiying.github.io    #仓库名称
+  #owner: qiubaiying    #github用户名
+  #admin: qiubaiying
+  #distractionFreeMode: true #是否启用类似FB的阴影遮罩
 
 
 # 统计
