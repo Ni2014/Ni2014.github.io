@@ -1,6 +1,6 @@
 ---
 layout:     post
-title:      LeanCloud数据SDKSDK解读1-基本概念
+title:      LeanCloud数据SDK解读1-基本概念
 subtitle:   Something about LeanCloud SDK - basic concepts 
 date:       2018-07-09
 author:     宸笙
