@@ -1,0 +1,139 @@
+---
+layout:     post
+title:      【译】ParseSDK里面有什么
+subtitle:   The Parse SDK_ What is inside
+date:       2018-07-012
+author:     宸笙
+catalog: true
+tags:
+    - SDK
+    - Parse
+    - Baas
+---
+
+
+
+The Parse SDK has been and continues to be an important part of mobile development on Parse. As Parse developers, you've already gotten to know the Parse SDK from its public API, but today we [open sourced our SDKs](http://blog.parse.com/announcements/open-sourcing-our-sdks/) so you'll finally be able to take a peek at its inner workings.
+
+对于Parse平台上的移动应用来说，ParseSDK已经正在成为重要的部分，作为Parse的开发者，你已经从ParseSDK提供的公有的API了解了它，但是今天我们开源了，所以你可以一窥ParseSDK中有什么宝贝啦！
+
+In this post, **we'll unpack a few of the most challenging aspects** of building the Parse SDKs — structuring an asynchronous API, decoupling architecture, and achieving API consistency. Over the next few weeks, we'll publish a series of blog posts diving into even more under-the-hood features of our SDKs.
+
+本文中，我们将会为你展现构建ParseSDK中的几个最具挑战性的方面--打造一套异步的API，解耦架构，并实现API的统一性。在接下来的数周内，我们将会持续输出博文介绍下SDK中的底层(under-the-hood)技术特性。
+
+* * *
+
+## Asynchronous API(异步的API)
+
+Some of the important functionalities of the Parse SDK include communicating over the network, persisting data to disk, and returning data to the developer so that they can update their UI. All of this needs to happen asynchronously, in parallel and off the main thread. With this in mind, it should be no surprise to you that the most important part of our SDK is how we do asynchronous programming. Last year, we released `Tasks` as a part of [Bolts](http://blog.parse.com/announcements/lets-bolt/), a composable promise-based library that simplifies parallelism and concurrency. We mentioned that we used it internally to solve some of our concurrency issues, but now you can finally see the extent of it.
+
+ParseSDK的重要功能中包括了和网络通信，持久化到磁盘，返回数据给开发者便于他们能更新UI。这些都是需要异步执行的，和主线程分离开来的。考虑到这点，不难想到SDK中一个很重要的任务就是怎样去做异步编程。去年，我们发布了`Tasks`，他作为[Bolts](http://blog.parse.com/announcements/lets-bolt/)的一部分。Bolts是基于promise(译者注：参考了js上promise的思路)的可组合的旨在简化并行并发的轻量级库。我们提到过，我们使用了Bolts作为内部使用去解决一些并发问题，不过你现在终于能看到它的具体场景了。
+
+Almost all of our internal APIs are Task-based. We utilize them to simplify serial execution of asynchronous operations such as persisting a dependency chain of `ParseObject`s to the server as well as parallel asynchronous operations such as persisting batches of unrelated `ParseObject`s. It's so powerful that we're even able to manage splicing the two together into a single asynchronous operation.
+
+我们几乎所有的内部API都是基于Task(任务)的，我们利用任务去简化一系列异步操作比如`ParseObject`的链式调用或者一些平行的异步操作提交比如批量操作的执行。它是很有生产力的，因为我们能把管理两个异步操作并合并为一个单独的异步操作。
+
+<pre class="line-numbers"><code class="language-java">/**
+&nbsp;* Saves a collection of objects in serial batches of leaf nodes.
+&nbsp;*/
+public Task&lt;Void&gt; deepSaveAsync(List&lt;ParseObject&gt; objects) {
+&nbsp;&nbsp;&nbsp;&nbsp;if (hasCycle(objects)) {
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;return Task.forError(new RuntimeException("Unable to save a ParseObject with a relation to a cycle"));
+&nbsp;&nbsp;&nbsp;&nbsp;}
+&nbsp;&nbsp;&nbsp;&nbsp;Task&lt;Void&gt; task = Task.forResult(null);
+
+&nbsp;&nbsp;&nbsp;&nbsp;List&lt;ParseObject&gt; remaining = new ArrayList&lt;&gt;(objects);
+&nbsp;&nbsp;&nbsp;&nbsp;while (remaining.size() &gt; 0) {
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;List&lt;ParseObject&gt; batch = collectLeafNodes(objects);
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;remaining.removeAll(batch);
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;// Execute each batch operation serially, awaiting until
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;// the previous has completed.
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;task = task.onSuccessTask((t) -&gt; {
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;return saveAllAsync(batch);
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;});
+&nbsp;&nbsp;&nbsp;&nbsp;}
+&nbsp;&nbsp;&nbsp;&nbsp;return task;
+}
+
+/**
+&nbsp;* Saves batches of objects in parallel.
+&nbsp;*/
+public Task&lt;Void&gt; saveAllAsync(List&lt;ParseObject&gt; objects) {
+&nbsp;&nbsp;&nbsp;&nbsp;if (objects.size() &gt; MAX_BATCH_SIZE) {
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;// The collection of objects is too big for a single batch,
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;// so partition the collection and execute each batch
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;// in parallel.
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;List&lt;List&lt;ParseObject&gt;&gt; partitioned = Lists.partition(objects, MAX_BATCH_SIZE);
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;List&lt;Task&lt;Void&gt;&gt; tasks = new ArrayList&lt;&gt;();
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;for (List&lt;ParseObject&gt; partition : partitioned) {
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;tasks.add(saveAllAsync(partition);
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;return Task.whenAll(tasks);
+&nbsp;&nbsp;&nbsp;&nbsp;}
+
+&nbsp;&nbsp;&nbsp;&nbsp;return executeBatchCommand(objects);
+}
+
+// * Abridged, for clarity</code></pre>
+
+Writing asynchronous APIs is a breeze with `Tasks` and we highly recommend taking a deeper look both at Bolts Framework: [Android](https://github.com/BoltsFramework/Bolts-Android), [iOS/OS X](https://github.com/BoltsFramework/Bolts-iOS) and our SDKs: [Android](https://github.com/ParsePlatform/Parse-SDK-Android), [iOS/OS X](https://github.com/ParsePlatform/Parse-SDK-iOS-OSX)
+
+用`Tasks`来写异步API是轻而易举的事情，我们也墙裂推荐你去深究下我们的Bolts框架。
+
+## Decoupled Architecture and API Consistency(解耦架构并实现API统一性)
+
+Keeping the Parse SDK experience as easy and delightful as possible is one of our highest priorities. However, it's hard to add new features and make our SDK more robust without making breaking changes. Additionally, as our codebase grows, we need to ensure that our code stays testable so that we can deliver the most stable experience to our developers.
+
+让ParseSDK的使用体验尽可能简单轻巧受欢迎一只是我们的头等大事之一，然而，另外，随着我们代码库的膨胀，我们需要保证我们的代码保持可测试这样我们才能把最稳定的使用体验带给我们的开发者。
+
+To solve all this, we've adopted a decoupled architecture model that consists of our public API object instances, object states, controllers, and REST protocol. Each piece is encapsulated to ensure separation of concerns and different implementations allow us to add new features without modifying too much code. Here's a diagram of how this all comes together:
+
+为了解决这些问题，我们采用了一个解耦架构模型，里面包涵了我们的公有的API对象实例，对状态，控制器还有REST协议。为了保证关注点分离每一层都被封装并允许我们不用修改很多代码的前提下就能添加新功能。如图：
+
+<figure id="attachment_3695" style="width: 1400px" class="wp-caption alignnone">
+
+<img class="wp-image-3695 size-full" src="{{ site.url }}/assets/wp-content/uploads/2015/08/new-sdk-diagram.jpg" alt="" width="1400" height="800" srcset="{{ site.url }}/assets/wp-content/uploads/2015/08/new-sdk-diagram.jpg 1400w, {{ site.url }}/assets/wp-content/uploads/2015/08/new-sdk-diagram-300x171.jpg 300w, {{ site.url }}/assets/wp-content/uploads/2015/08/new-sdk-diagram-1024x585.jpg 1024w, {{ site.url }}/assets/wp-content/uploads/2015/08/new-sdk-diagram-875x500.jpg 875w" sizes="(max-width: 1400px) 100vw, 1400px" /><figcaption class="wp-caption-text">Our decoupled architecture model.</figcaption></figure> 
+
+## Object Instance(对象实例)
+
+The object instance is the piece that allows us to maintain an easy-to-use and unchanging API. For `ParseObject`, this is the API surface layer that contains getting and setting `ParseObject` properties, as well as saving, fetching, and deleting. As long as we keep this intact, we can refactor and add new features on the underlying levels without any breaking changes.
+
+对象实例是一层允许我们去维护并容易使用的不可改变的API，对于`ParseObject`来说，这是关于获取和设置`ParseObject`的API层，也有保存，获取和删除。只要保持这个的完整，我们就能在不带来破坏性的变更的前提下进行重构和新增功能。
+
+## State(状态)
+
+The state refers to the combination of the internal state of the object. For `ParseObject`, it is the current representation of itself on the server, the collection of mutations that have performed locally, and a cache of its current representation locally.
+
+状态指的是对象内部状态的组合，对于`ParseObject`来说，状态是一个服务器上自身状态的一种表示，在本地进行的突变的集合，也是当前状态的一个缓存；
+
+These state instances also define the interface in which the object instance and controller interact. The object instance passes its current state to the controller, the controller returns a new state back, and the object instance then updates itself with the new state.
+
+这些状态实例还定义了对象实例和控制器交互的接口。对象实例将其当前状态传到控制器，控制器返回一个新状态，然后对象实例就用新状态更新自己。
+
+## Controller(控制器)
+
+The controller defines all the actions that can be performed on each Parse type: A `ParseObject` can be saved, fetched, and deleted, a `ParseQuery` can be found and counted, and a `ParseFile` can be saved and fetched.
+
+控制器中定义了每个Parse数据类型能被执行的操作，比如：一个`ParseObject`对象能被保存，拉取和删除，一个`ParseQuery`对象能被发现和计数，一个`ParseFile`对象能被保存和获取；
+
+Our basic controllers serialize and deserialize our object states into our public REST format and pass along all requests to our internal networking logic. This prevents us from needing to complicate our instance and state implementations with unnecessary serialization and deserialization logic as well as affording us to be able to instrument our code for better testability.
+
+我们基础的控制器中序列化和反序列化对象状态为REST格式请求并进入网络请求逻辑，这使得我们不用实现序列化相关的接口并也是的我们能更平稳的构造我们的代码。
+
+We've also designed our controllers to be extendable to offer additional functionality other than communicating with Parse. One instance of this is Local Datastore. For this new feature, we were able to create another implementation of our `ParseQueryController`, but instead of communicating over the network with Parse it queried for objects locally on the device.
+
+我们还设计了可扩展的控制器，以提供除与Parse通信之外的其他功能，一个典型的例子就是本地数据存储，对于这个新功能，我们可以创建一个`ParseQueryController`的实现，但不是通过网络与Parse进行通信，而是在设备上本地查询对象。
+
+* * *
+
+### **Stay Tuned for More**
+
+In this post, we've covered a few major aspects of the Parse SDK architecture and how they were built. Stay tuned for future blog posts on topics like how we approach thread safety, our test philosophy, and more!
+
+本文中，我们涵盖了ParseSDK架构的主要层面和它是怎样构建的，请关注我们后续的如何处理线程安全，测试理念等主题的博客文章！
+&nbsp;
+  
+**Ready to dig into the code?**
+  
+You can find it here for [Android](https://github.com/ParsePlatform/Parse-SDK-Android) and [iOS/OS X](https://github.com/ParsePlatform/Parse-SDK-iOS-OSX).
